@@ -1,4 +1,4 @@
-defmodule Filter do
+defmodule TCPFilter.Filter do
   @doc """
   Filters messages sent over Erlang distribution.
   """
