@@ -292,12 +292,12 @@ defmodule TCPFilter_dist.Controller do
   end
 
   def call(controller, message) do
-    ref = :erlang.monitor(:process, controller)
+    ref = Process.monitor(controller)
     send(controller, {ref, self(), message})
 
     receive do
       {^ref, res} ->
-        :erlang.demonitor(ref, [:flush])
+        Process.demonitor(ref, [:flush])
         res
 
       {:DOWN, ^ref, :process, ^controller, reason} ->

@@ -40,4 +40,20 @@ defmodule TCPFilter.Filter do
             ) :: filter_result
   @callback filter({:alias_send, pid, term}, term) :: filter_result
   @callback filter({:alias_send_tt, pid, term, term}, term) :: filter_result
+
+  defmacro __using__(_opts) do
+    quote do
+      @before_compile TCPFilter.Filter
+      @behaviour TCPFilter.Filter
+    end
+  end
+
+  defmacro __before_compile__(_env) do
+    quote do
+      @impl true
+      def filter(_control_message, _message), do: :ignore
+      @impl true
+      def filter(_control_message), do: :ignore
+    end
+  end
 end
