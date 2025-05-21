@@ -5,15 +5,16 @@ defmodule TCPFilter_dist.Setup do
   # setup a new connection to another Erlang node
   # performs the handshake with the other side
   def setup(node, type, my_node, long_or_short_names, setup_time) do
+    socket_mod = TCPFilter.get_socket()
     Process.spawn(
       __MODULE__,
       :do_setup,
-      [self(), node, type, my_node, long_or_short_names, setup_time],
+      [socket_mod, self(), node, type, my_node, long_or_short_names, setup_time],
       :dist_util.net_ticker_spawn_options()
     )
   end
 
-  def do_setup(kernel, node, type, my_node, long_or_short_names, setup_time) do
+  def do_setup(socket_mod, kernel, node, type, my_node, long_or_short_names, setup_time) do
     [name, address] = TCPFilter_dist.split_node(node, long_or_short_names)
 
     case :inet.getaddr(address, :inet) do
@@ -25,17 +26,17 @@ defmodule TCPFilter_dist.Setup do
           {:port, tcp_port, version} ->
             :dist_util.reset_timer(timer)
 
-            case TCPFilter.get_socket().connect(
+            case socket_mod.connect(
                    ip,
                    tcp_port,
                    connect_options([:binary, {:active, false}, {:packet, 2}])
                  ) do
               {:ok, socket} ->
-                dist_controller = TCPFilter_dist.Controller.spawn(socket)
+                dist_controller = TCPFilter_dist.Controller.spawn({socket_mod, socket})
                 TCPFilter_dist.Controller.call(dist_controller, {:supervisor, self()})
-                flush_controller(dist_controller, socket)
-                TCPFilter.get_socket().controlling_process(socket, dist_controller)
-                flush_controller(dist_controller, socket)
+                flush_controller(dist_controller, {socket_mod, socket})
+                socket_mod.controlling_process(socket, dist_controller)
+                flush_controller(dist_controller, {socket_mod, socket})
 
                 hs_data =
                   HandshakeData.hs_data(

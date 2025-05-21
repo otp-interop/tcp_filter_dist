@@ -36,29 +36,31 @@ defmodule TCPFilter_dist do
     to: TCPFilter_dist.Setup
 
   # close a socket
-  def close(socket) do
-    TCPFilter.get_socket().close(socket)
+  def close({socket_mod, socket}) do
+    socket_mod.close(socket)
   end
 
-  def setopts(socket, opts) do
-    TCPFilter.get_socket().setopts(socket, opts)
+  def setopts({socket_mod, socket}, opts) do
+    socket_mod.setopts(socket, opts)
   end
 
-  def getopts(socket, opts) do
-    TCPFilter.get_socket().getopts(socket, opts)
+  def getopts({socket_mod, socket}, opts) do
+    socket_mod.getopts(socket, opts)
   end
 
   # helpers
 
-  def flush_controller(pid, socket) do
+  def flush_controller(pid, {socket_mod, socket} = socket_tuple) do
     receive do
-      {:tcp, ^socket, data} ->
-        send(pid, {:tcp, socket, data})
-        flush_controller(pid, socket)
-
-      {:tcp_closed, socket} ->
-        send(pid, {:tcp_closed, socket})
-        flush_controller(pid, socket)
+      msg ->
+        case socket_mod.handle_input(socket, msg) do
+          {:data, data} ->
+            send(pid, {:data, data})
+            flush_controller(pid, socket_tuple)
+          {:error, :closed} ->
+            send(pid, {:error, :closed})
+            flush_controller(pid, socket_tuple)
+        end
     after
       0 ->
         :ok
@@ -67,7 +69,7 @@ defmodule TCPFilter_dist do
 
   def hs_data_common(dist_controller) do
     tick_handler = TCPFilter_dist.Controller.call(dist_controller, :tick_handler)
-    socket = TCPFilter_dist.Controller.call(dist_controller, :socket)
+    {socket_mod, socket} = TCPFilter_dist.Controller.call(dist_controller, :socket)
 
     reject_flags =
       case :init.get_argument(:gen_tcp_dist_reject_flags) do
@@ -117,7 +119,7 @@ defmodule TCPFilter_dist do
         getopts(socket, opts)
       end,
       mf_getstat: fn controller when controller == dist_controller ->
-        case TCPFilter.get_socket().getstat(socket, [:recv_cnt, :send_cnt, :send_pend]) do
+        case socket_mod.getstat(socket, [:recv_cnt, :send_cnt, :send_pend]) do
           {:ok, stat} ->
             split_stat(stat, 0, 0, 0)
 

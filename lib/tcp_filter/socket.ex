@@ -6,6 +6,11 @@ defmodule TCPFilter.Socket do
   @type socket :: any()
   @type ip_address :: :inet.socket_address() | :inet.hostname()
 
+  @callback family() :: atom()
+  @callback protocol() :: atom()
+
+  @callback handle_input(socket :: socket(), any()) :: {:data, binary() | list()} | {:error, :closed} | any()
+
   @callback listen(port :: integer(), options :: any()) :: {:ok, socket()} | {:error, any()}
   @callback accept(socket :: socket()) :: {:ok, socket()} | {:error, any()}
   @callback connect(ip :: ip_address(), port :: integer(), options :: any()) :: {:ok, socket()} | {:error, any()}

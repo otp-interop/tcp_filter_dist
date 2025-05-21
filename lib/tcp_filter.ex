@@ -45,7 +45,6 @@ defmodule TCPFilter do
   def filter(:tick), do: :ok
 
   def filter({control_message, nil}) do
-    dbg control_message
     case get_filter() do
       nil ->
         :ok

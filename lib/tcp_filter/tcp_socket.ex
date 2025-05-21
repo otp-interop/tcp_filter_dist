@@ -1,6 +1,16 @@
 defmodule TCPFilter.TCPSocket do
   @behaviour TCPFilter.Socket
 
+  def family, do: :inet
+  def protocol, do: :tcp
+
+  def handle_input(socket, {:tcp_closed, socket}),
+    do: {:error, :closed}
+  def handle_input(socket, {:tcp, socket, data}),
+    do: {:data, data}
+  def handle_input(_socket, other),
+    do: other
+
   def listen(port, options) do
     :gen_tcp.listen(port, options)
   end

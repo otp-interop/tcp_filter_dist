@@ -51,7 +51,7 @@ defmodule TCPFilter_dist.Controller do
     tick_handler(socket)
   end
 
-  defp setup_loop(socket, tick_handler, supervisor) do
+  defp setup_loop({socket_mod, socket} = socket_tuple, tick_handler, supervisor) do
     receive do
       {:tcp_closed, ^socket} ->
         exit(:connection_closed)
@@ -59,41 +59,41 @@ defmodule TCPFilter_dist.Controller do
       {ref, from, {:supervisor, pid}} ->
         res = Process.link(pid)
         send(from, {ref, res})
-        setup_loop(socket, tick_handler, pid)
+        setup_loop(socket_tuple, tick_handler, pid)
 
       {ref, from, :tick_handler} ->
         send(from, {ref, tick_handler})
-        setup_loop(socket, tick_handler, supervisor)
+        setup_loop(socket_tuple, tick_handler, supervisor)
 
       {ref, from, :socket} ->
-        send(from, {ref, socket})
-        setup_loop(socket, tick_handler, supervisor)
+        send(from, {ref, socket_tuple})
+        setup_loop(socket_tuple, tick_handler, supervisor)
 
       {ref, from, {:send, packet}} ->
-        res = TCPFilter.get_socket().send(socket, packet)
+        res = socket_mod.send(socket, packet)
         send(from, {ref, res})
-        setup_loop(socket, tick_handler, supervisor)
+        setup_loop(socket_tuple, tick_handler, supervisor)
 
       {ref, from, {:recv, length, timeout}} ->
-        res = TCPFilter.get_socket().recv(socket, length, timeout)
+        res = socket_mod.recv(socket, length, timeout)
         send(from, {ref, res})
-        setup_loop(socket, tick_handler, supervisor)
+        setup_loop(socket_tuple, tick_handler, supervisor)
 
       {ref, from, :getll} ->
         send(from, {ref, {:ok, self()}})
-        setup_loop(socket, tick_handler, supervisor)
+        setup_loop(socket_tuple, tick_handler, supervisor)
 
       {ref, from, {:address, node}} ->
         res =
-          case TCPFilter.get_socket().peername(socket) do
+          case socket_mod.peername(socket) do
             {:ok, address} ->
               case TCPFilter_dist.split_node(Atom.to_charlist(node), ?@, []) do
                 [_, host] ->
                   NetAddress.net_address(
                     address: address,
                     host: host,
-                    protocol: :tcp,
-                    family: :inet
+                    family: socket_mod.family(),
+                    protocol: socket_mod.protocol()
                   )
 
                 _ ->
@@ -102,27 +102,27 @@ defmodule TCPFilter_dist.Controller do
           end
 
         send(from, {ref, res})
-        setup_loop(socket, tick_handler, supervisor)
+        setup_loop(socket_tuple, tick_handler, supervisor)
 
       {ref, from, :pre_nodeup} ->
         res =
-          TCPFilter.get_socket().setopts(
+          socket_mod.setopts(
             socket,
             [{:active, false}, {:packet, 4}, nodelay()]
           )
 
         send(from, {ref, res})
-        setup_loop(socket, tick_handler, supervisor)
+        setup_loop(socket_tuple, tick_handler, supervisor)
 
       {ref, from, :post_nodeup} ->
         res =
-          TCPFilter.get_socket().setopts(
+          socket_mod.setopts(
             socket,
             [{:active, false}, {:packet, 4}, nodelay()]
           )
 
         send(from, {ref, res})
-        setup_loop(socket, tick_handler, supervisor)
+        setup_loop(socket_tuple, tick_handler, supervisor)
 
       {ref, from, {:handshake_complete, _node, d_handle}} ->
         send(from, {ref, :ok})
@@ -131,13 +131,13 @@ defmodule TCPFilter_dist.Controller do
           Process.spawn(
             __MODULE__,
             :input_setup,
-            [d_handle, socket, supervisor],
+            [d_handle, socket_tuple, supervisor],
             [:link] ++ @common_spawn_opts
           )
 
-        TCPFilter_dist.flush_controller(input_handler, socket)
-        TCPFilter.get_socket().controlling_process(socket, input_handler)
-        TCPFilter_dist.flush_controller(input_handler, socket)
+        TCPFilter_dist.flush_controller(input_handler, socket_tuple)
+        socket_mod.controlling_process(socket, input_handler)
+        TCPFilter_dist.flush_controller(input_handler, socket_tuple)
 
         :ok = :erlang.dist_ctrl_input_handler(d_handle, input_handler)
 
@@ -146,17 +146,7 @@ defmodule TCPFilter_dist.Controller do
         Process.flag(:priority, :normal)
         :erlang.dist_ctrl_get_data_notification(d_handle)
 
-        case :init.get_argument(:gen_tcp_dist_output_loop) do
-          :error ->
-            output_loop(d_handle, socket)
-
-          {:ok, [[mod_str, func_str]]} ->
-            apply(
-              String.to_atom(mod_str),
-              String.to_atom(func_str),
-              [d_handle, socket]
-            )
-        end
+        output_loop(d_handle, socket_tuple)
     end
   end
 
@@ -193,60 +183,54 @@ defmodule TCPFilter_dist.Controller do
     end
   end
 
-  defp input_loop(d_handle, socket, n) when n <= @active_input / 2 do
-    TCPFilter.get_socket().setopts(socket, [{:active, @active_input - n}])
-    input_loop(d_handle, socket, @active_input)
+  defp input_loop(d_handle, {socket_mod, socket} = socket_tuple, n) when n <= @active_input / 2 do
+    socket_mod.setopts(socket, [{:active, @active_input - n}])
+    input_loop(d_handle, socket_tuple, @active_input)
   end
 
-  defp input_loop(d_handle, socket, n) do
+  defp input_loop(d_handle, {socket_mod, socket} = socket_tuple, n) do
     receive do
-      {:tcp_closed, ^socket} ->
-        exit(:connection_closed)
+      msg ->
+        case socket_mod.handle_input(socket, msg) do
+          {:error, :closed} ->
+            exit(:connection_closed)
+          {:data, data} ->
+            # incoming data from remote node
+            safe_message = TCPFilter.decode(data)
+            filter_res = TCPFilter.filter(safe_message)
+            case filter_res do
+              :ok ->
+                try do
+                  :erlang.dist_ctrl_put_data(d_handle, data)
+                catch
+                  _, _ -> death_row()
+                end
 
-      {:tcp, ^socket, data} ->
-        dbg data
-        # incoming data from remote node
-        safe_message = TCPFilter.decode(data)
+              :ignore ->
+                case safe_message do
+                  {control_message, nil} ->
+                    :error_logger.warning_msg(~c"** Ignored message ~p **~n", [control_message])
 
-        dbg safe_message
+                  {control_message, message} ->
+                    :error_logger.warning_msg(~c"** Ignored message ~p: ~p **~n", [
+                      control_message,
+                      message
+                    ])
+                end
 
-        filter_res = TCPFilter.filter(safe_message)
-        dbg filter_res
-        case filter_res do
-          :ok ->
-            try do
-              dbg "putting data"
-              dbg data
-              :erlang.dist_ctrl_put_data(d_handle, data)
-            catch
-              _, _ -> death_row()
+              {:error, reason} ->
+                :error_logger.error_msg(~c"** Ignored message **~n** Reason: ~p **~n", [reason])
+
+              {:rewrite, rewritten} ->
+                <<131, encoded_data::binary>> = :erlang.term_to_binary(rewritten)
+                :erlang.dist_ctrl_put_data(d_handle, <<131, 68, 0>> <> encoded_data)
             end
 
-          :ignore ->
-            case safe_message do
-              {control_message, nil} ->
-                :error_logger.warning_msg(~c"** Ignored message ~p **~n", [control_message])
-
-              {control_message, message} ->
-                :error_logger.warning_msg(~c"** Ignored message ~p: ~p **~n", [
-                  control_message,
-                  message
-                ])
-            end
-
-          {:error, reason} ->
-            :error_logger.error_msg(~c"** Ignored message **~n** Reason: ~p **~n", [reason])
-
-          {:rewrite, rewritten} ->
-            <<131, encoded_data::binary>> = :erlang.term_to_binary(rewritten)
-            :erlang.dist_ctrl_put_data(d_handle, <<131, 68, 0>> <> encoded_data)
+            input_loop(d_handle, socket_tuple, n - 1)
+          _ ->
+            # ignore
+            input_loop(d_handle, socket_tuple, n)
         end
-
-        input_loop(d_handle, socket, n - 1)
-
-      _ ->
-        # ignore
-        input_loop(d_handle, socket, n)
     end
   end
 
@@ -261,9 +245,9 @@ defmodule TCPFilter_dist.Controller do
     end
   end
 
-  defp sock_send(socket, data) do
+  defp sock_send({socket_mod, socket}, data) do
     try do
-      TCPFilter.get_socket().send(socket, data)
+      socket_mod.send(socket, data)
     catch
       type, reason -> death_row({:send_error, {type, reason}})
     else

@@ -7,15 +7,14 @@ defmodule TCPFilter_dist.Accept do
     Process.spawn(__MODULE__, :accept_loop, [self(), listen], [:link, {:priority, :max}])
   end
 
-  def accept_loop(kernel, listen) do
-    case TCPFilter.get_socket().accept(listen) do
+  def accept_loop(kernel, {socket_mod, listen_socket} = listen_socket_tuple) do
+    case socket_mod.accept(listen_socket) do
       {:ok, socket} ->
-        dist_controller = TCPFilter_dist.Controller.spawn(socket)
-        flush_controller(dist_controller, socket)
-        TCPFilter.get_socket().controlling_process(socket, dist_controller)
-        flush_controller(dist_controller, socket)
-        send(kernel, {:accept, self(), dist_controller, :inet, :tcp})
-
+        dist_controller = TCPFilter_dist.Controller.spawn({socket_mod, socket})
+        flush_controller(dist_controller, {socket_mod, socket})
+        socket_mod.controlling_process(socket, dist_controller)
+        flush_controller(dist_controller, {socket_mod, socket})
+        send(kernel, {:accept, self(), dist_controller, socket_mod.family(), socket_mod.protocol()})
         receive do
           {^kernel, :controller, pid} ->
             TCPFilter_dist.Controller.call(dist_controller, {:supervisor, pid})
@@ -25,7 +24,7 @@ defmodule TCPFilter_dist.Accept do
             exit(:unsupported_protocol)
         end
 
-        accept_loop(kernel, listen)
+        accept_loop(kernel, listen_socket_tuple)
 
       error ->
         exit(error)
@@ -87,9 +86,9 @@ defmodule TCPFilter_dist.Accept do
   end
 
   defp get_ifs(dist_controller) do
-    socket = TCPFilter_dist.Controller.call(dist_controller, :socket)
+    {socket_mod, socket} = TCPFilter_dist.Controller.call(dist_controller, :socket)
 
-    case TCPFilter.get_socket().peername(socket) do
+    case socket_mod.peername(socket) do
       {:ok, {ip, _}} ->
         case :inet.getif(socket) do
           {:ok, ifs} ->

@@ -1,20 +1,30 @@
 defmodule TCPFilter.SSLSocket do
   @behaviour TCPFilter.Socket
 
+  def family, do: :inet
+  def protocol, do: :tls
+
+  def handle_input(socket, {:ssl_closed, socket}),
+    do: {:error, :closed}
+  def handle_input(socket, {:ssl, socket, data}),
+    do: {:data, data}
+  def handle_input(_socket, other),
+    do: other
+
   def listen(port, options) do
     :ssl.listen(port, options)
   end
 
   def accept(socket) do
     case :ssl.transport_accept(socket) do
-      {:ok, transport_socket} = res ->
+      {:ok, transport_socket} ->
         opts = case :ssl.peername(transport_socket) do
           {:ok, {peer_ip, _port}} ->
             get_ssl_server_options(peer_ip)
           {:error, reason} ->
             exit({:no_peername, reason})
         end
-        :ssl.handshake(
+        res = :ssl.handshake(
           transport_socket,
           [{:active, false}, {:packet, 4} | opts],
           :net_kernel.connecttime()

@@ -3,15 +3,16 @@ defmodule TCPFilter_dist.Listen do
 
   # create the listen socket, the port that this Erlang node is accessible through
   def listen(name) do
-    case do_listen([:binary, {:active, false}, {:packet, 2}, {:reuseaddr, true}]) do
+    socket_mod = TCPFilter.get_socket()
+    case do_listen(socket_mod, [:binary, {:active, false}, {:packet, 2}, {:reuseaddr, true}]) do
       {:ok, socket} ->
-        tcp_address = get_tcp_address(socket)
+        tcp_address = get_tcp_address({socket_mod, socket})
         {_, port} = NetAddress.net_address(tcp_address, :address)
         erl_epmd = :net_kernel.epmd_module()
 
         case erl_epmd.register_node(name, port) do
           {:ok, creation} ->
-            {:ok, {socket, tcp_address, creation}}
+            {:ok, {{socket_mod, socket}, tcp_address, creation}}
 
           error ->
             error
@@ -22,7 +23,7 @@ defmodule TCPFilter_dist.Listen do
     end
   end
 
-  defp do_listen(options) do
+  defp do_listen(socket_mod, options) do
     {first, last} =
       case Application.get_env(:kernel, :inet_dist_listen_min) do
         {:ok, n} when is_integer(n) ->
@@ -38,15 +39,15 @@ defmodule TCPFilter_dist.Listen do
           {0, 0}
       end
 
-    do_listen(first, last, listen_options([{:backlog, 128} | options]))
+    do_listen(socket_mod, first, last, listen_options([{:backlog, 128} | options]))
   end
 
-  defp do_listen(first, last, _) when first > last, do: {:error, :eaddrinuse}
+  defp do_listen(_socket_mod, first, last, _) when first > last, do: {:error, :eaddrinuse}
 
-  defp do_listen(first, last, options) do
-    case TCPFilter.get_socket().listen(first, options) do
+  defp do_listen(socket_mod, first, last, options) do
+    case socket_mod.listen(first, options) do
       {:error, :eaddrinuse} ->
-        do_listen(first + 1, last, options)
+        do_listen(socket_mod, first + 1, last, options)
 
       other ->
         other
@@ -72,22 +73,22 @@ defmodule TCPFilter_dist.Listen do
     end
   end
 
-  defp get_tcp_address(socket) do
-    {:ok, address} = TCPFilter.get_socket().sockname(socket)
+  defp get_tcp_address({socket_mod, socket}) do
+    {:ok, address} = socket_mod.sockname(socket)
 
     NetAddress.net_address(
-      get_tcp_address(),
+      get_tcp_address(socket_mod),
       address: address
     )
   end
 
-  defp get_tcp_address() do
+  defp get_tcp_address(socket_mod) do
     {:ok, host} = :inet.gethostname()
 
     NetAddress.net_address(
       host: host,
-      protocol: :tcp,
-      family: :inet
+      family: socket_mod.family(),
+      protocol: socket_mod.protocol()
     )
   end
 end
