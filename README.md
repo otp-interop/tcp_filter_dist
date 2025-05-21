@@ -34,7 +34,7 @@ defmodule MyApp.Filter do
 end
 ```
 
-Set the filter to use with `TCPFilter.set_filter/2`:
+Set the filter to use with `TCPFilter.set_filter/1`:
 
 ```elixir
 TCPFilter.set_filter(MyApp.Filter)
@@ -45,6 +45,37 @@ You can also set this filter when starting the `TCPFilter` in your supervisor:
 ```elixir
 {TCPFilter, filter: MyApp.Filter, name: TCPFilter}
 ```
+
+## TLS
+To use TLS, use `TCPFilter.set_socket/1` with the `TCPFilter.SSLSocket` module:
+
+```elixir
+TCPFilter.set_socket(TCPFilter.SSLSocket)
+```
+
+You can also set this filter when starting the `TCPFilter` in your supervisor:
+
+```elixir
+{TCPFilter, filter: MyApp.Filter, socket: TCPFilter.SSLSocket, name: TCPFilter}
+```
+
+See [Erlang Distribution over TLS](https://www.erlang.org/doc/apps/ssl/ssl_distribution.html) for more information on configuring TLS in your application.
+
+### Custom Socket Modules
+Besides `TCPFilter.TCPSocket` and `TCPFilter.SSLSocket`, you can implement your own socket modules to handle all of the socket operations needed for a distribution module.
+
+For example, you could define a module that sends messages over a WebSocket.
+
+```elixir
+defmodule MyApp.WebSocket do
+  @behaviour TCPFilter.Socket
+  # ...
+end
+
+TCPFilter.set_socket(MyApp.WebSocket)
+```
+
+See `TCPFilter.Socket` for more information.
 
 ## Installation
 
