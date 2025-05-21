@@ -25,7 +25,7 @@ defmodule TCPFilter_dist.Setup do
           {:port, tcp_port, version} ->
             :dist_util.reset_timer(timer)
 
-            case :gen_tcp.connect(
+            case TCPFilter.get_socket().connect(
                    ip,
                    tcp_port,
                    connect_options([:binary, {:active, false}, {:packet, 2}])
@@ -34,7 +34,7 @@ defmodule TCPFilter_dist.Setup do
                 dist_controller = TCPFilter_dist.Controller.spawn(socket)
                 TCPFilter_dist.Controller.call(dist_controller, {:supervisor, self()})
                 flush_controller(dist_controller, socket)
-                :gen_tcp.controlling_process(socket, dist_controller)
+                TCPFilter.get_socket().controlling_process(socket, dist_controller)
                 flush_controller(dist_controller, socket)
 
                 hs_data =

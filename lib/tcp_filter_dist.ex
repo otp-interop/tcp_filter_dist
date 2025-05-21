@@ -37,15 +37,15 @@ defmodule TCPFilter_dist do
 
   # close a socket
   def close(socket) do
-    :gen_tcp.close(socket)
+    TCPFilter.get_socket().close(socket)
   end
 
-  def setopts(s, opts) do
-    :inet.setopts(s, opts)
+  def setopts(socket, opts) do
+    TCPFilter.get_socket().setopts(socket, opts)
   end
 
-  def getopts(s, opts) do
-    :inet.getopts(s, opts)
+  def getopts(socket, opts) do
+    TCPFilter.get_socket().getopts(socket, opts)
   end
 
   # helpers
@@ -117,7 +117,7 @@ defmodule TCPFilter_dist do
         getopts(socket, opts)
       end,
       mf_getstat: fn controller when controller == dist_controller ->
-        case :inet.getstat(socket, [:recv_cnt, :send_cnt, :send_pend]) do
+        case TCPFilter.get_socket().getstat(socket, [:recv_cnt, :send_cnt, :send_pend]) do
           {:ok, stat} ->
             split_stat(stat, 0, 0, 0)
 

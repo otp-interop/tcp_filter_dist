@@ -8,11 +8,11 @@ defmodule TCPFilter_dist.Accept do
   end
 
   def accept_loop(kernel, listen) do
-    case :gen_tcp.accept(listen) do
+    case TCPFilter.get_socket().accept(listen) do
       {:ok, socket} ->
         dist_controller = TCPFilter_dist.Controller.spawn(socket)
         flush_controller(dist_controller, socket)
-        :gen_tcp.controlling_process(socket, dist_controller)
+        TCPFilter.get_socket().controlling_process(socket, dist_controller)
         flush_controller(dist_controller, socket)
         send(kernel, {:accept, self(), dist_controller, :inet, :tcp})
 
@@ -89,7 +89,7 @@ defmodule TCPFilter_dist.Accept do
   defp get_ifs(dist_controller) do
     socket = TCPFilter_dist.Controller.call(dist_controller, :socket)
 
-    case :inet.peername(socket) do
+    case TCPFilter.get_socket().peername(socket) do
       {:ok, {ip, _}} ->
         case :inet.getif(socket) do
           {:ok, ifs} ->

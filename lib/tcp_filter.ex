@@ -1,18 +1,33 @@
 defmodule TCPFilter do
   use GenServer
 
-  def init(filter), do: {:ok, filter}
+  def init(state), do: {:ok, state}
 
-  def start_link([{:filter, filter} | opts]) do
-    GenServer.start_link(__MODULE__, filter, opts)
+  def start_link(opts) do
+    GenServer.start_link(
+      __MODULE__,
+      %{
+        filter: Keyword.get(opts, :filter),
+        socket: Keyword.get(opts, :socket, TCPFilter.TCPSocket),
+      },
+      opts
+    )
   end
 
-  def handle_call({:set_filter, filter}, _from, old_filter) do
-    {:reply, old_filter, filter}
+  def handle_call({:set_filter, filter}, _from, %{ filter: old_filter } = state) do
+    {:reply, old_filter, Map.put(state, :filter, filter)}
   end
 
-  def handle_call(:get_filter, _from, filter) do
-    {:reply, filter, filter}
+  def handle_call(:get_filter, _from, %{ filter: filter } = state) do
+    {:reply, filter, state}
+  end
+
+  def handle_call({:set_socket, socket}, _from, %{ socket: old_socket } = state) do
+    {:reply, old_socket, Map.put(state, :socket, socket)}
+  end
+
+  def handle_call(:get_socket, _from, %{ socket: socket } = state) do
+    {:reply, socket, state}
   end
 
   def set_filter(filter) do
@@ -21,14 +36,31 @@ defmodule TCPFilter do
 
   def get_filter, do: GenServer.call(__MODULE__, :get_filter)
 
+  def set_socket(socket) do
+    GenServer.call(__MODULE__, {:set_socket, socket})
+  end
+
+  def get_socket, do: GenServer.call(__MODULE__, :get_socket)
+
   def filter(:tick), do: :ok
 
   def filter({control_message, nil}) do
-    get_filter().filter(control_message)
+    dbg control_message
+    case get_filter() do
+      nil ->
+        :ok
+      filter_mod ->
+        filter_mod.filter(control_message)
+    end
   end
 
   def filter({control_message, message}) do
-    get_filter().filter(control_message, message)
+    case get_filter() do
+      nil ->
+        :ok
+      filter_mod ->
+        filter_mod.filter(control_message, message)
+    end
   end
 
   @version 131

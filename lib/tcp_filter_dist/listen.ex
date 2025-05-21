@@ -44,7 +44,7 @@ defmodule TCPFilter_dist.Listen do
   defp do_listen(first, last, _) when first > last, do: {:error, :eaddrinuse}
 
   defp do_listen(first, last, options) do
-    case :gen_tcp.listen(first, options) do
+    case TCPFilter.get_socket().listen(first, options) do
       {:error, :eaddrinuse} ->
         do_listen(first + 1, last, options)
 
@@ -73,7 +73,7 @@ defmodule TCPFilter_dist.Listen do
   end
 
   defp get_tcp_address(socket) do
-    {:ok, address} = :inet.sockname(socket)
+    {:ok, address} = TCPFilter.get_socket().sockname(socket)
 
     NetAddress.net_address(
       get_tcp_address(),

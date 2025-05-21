@@ -70,12 +70,12 @@ defmodule TCPFilter_dist.Controller do
         setup_loop(socket, tick_handler, supervisor)
 
       {ref, from, {:send, packet}} ->
-        res = :gen_tcp.send(socket, packet)
+        res = TCPFilter.get_socket().send(socket, packet)
         send(from, {ref, res})
         setup_loop(socket, tick_handler, supervisor)
 
       {ref, from, {:recv, length, timeout}} ->
-        res = :gen_tcp.recv(socket, length, timeout)
+        res = TCPFilter.get_socket().recv(socket, length, timeout)
         send(from, {ref, res})
         setup_loop(socket, tick_handler, supervisor)
 
@@ -85,7 +85,7 @@ defmodule TCPFilter_dist.Controller do
 
       {ref, from, {:address, node}} ->
         res =
-          case :inet.peername(socket) do
+          case TCPFilter.get_socket().peername(socket) do
             {:ok, address} ->
               case TCPFilter_dist.split_node(Atom.to_charlist(node), ?@, []) do
                 [_, host] ->
@@ -106,7 +106,7 @@ defmodule TCPFilter_dist.Controller do
 
       {ref, from, :pre_nodeup} ->
         res =
-          :inet.setopts(
+          TCPFilter.get_socket().setopts(
             socket,
             [{:active, false}, {:packet, 4}, nodelay()]
           )
@@ -116,7 +116,7 @@ defmodule TCPFilter_dist.Controller do
 
       {ref, from, :post_nodeup} ->
         res =
-          :inet.setopts(
+          TCPFilter.get_socket().setopts(
             socket,
             [{:active, false}, {:packet, 4}, nodelay()]
           )
@@ -136,7 +136,7 @@ defmodule TCPFilter_dist.Controller do
           )
 
         TCPFilter_dist.flush_controller(input_handler, socket)
-        :gen_tcp.controlling_process(socket, input_handler)
+        TCPFilter.get_socket().controlling_process(socket, input_handler)
         TCPFilter_dist.flush_controller(input_handler, socket)
 
         :ok = :erlang.dist_ctrl_input_handler(d_handle, input_handler)
@@ -194,7 +194,7 @@ defmodule TCPFilter_dist.Controller do
   end
 
   defp input_loop(d_handle, socket, n) when n <= @active_input / 2 do
-    :inet.setopts(socket, [{:active, @active_input - n}])
+    TCPFilter.get_socket().setopts(socket, [{:active, @active_input - n}])
     input_loop(d_handle, socket, @active_input)
   end
 
@@ -204,12 +204,19 @@ defmodule TCPFilter_dist.Controller do
         exit(:connection_closed)
 
       {:tcp, ^socket, data} ->
+        dbg data
         # incoming data from remote node
         safe_message = TCPFilter.decode(data)
 
-        case TCPFilter.filter(safe_message) do
+        dbg safe_message
+
+        filter_res = TCPFilter.filter(safe_message)
+        dbg filter_res
+        case filter_res do
           :ok ->
             try do
+              dbg "putting data"
+              dbg data
               :erlang.dist_ctrl_put_data(d_handle, data)
             catch
               _, _ -> death_row()
@@ -230,7 +237,7 @@ defmodule TCPFilter_dist.Controller do
           {:error, reason} ->
             :error_logger.error_msg(~c"** Ignored message **~n** Reason: ~p **~n", [reason])
 
-          rewritten ->
+          {:rewrite, rewritten} ->
             <<131, encoded_data::binary>> = :erlang.term_to_binary(rewritten)
             :erlang.dist_ctrl_put_data(d_handle, <<131, 68, 0>> <> encoded_data)
         end
@@ -256,7 +263,7 @@ defmodule TCPFilter_dist.Controller do
 
   defp sock_send(socket, data) do
     try do
-      :gen_tcp.send(socket, data)
+      TCPFilter.get_socket().send(socket, data)
     catch
       type, reason -> death_row({:send_error, {type, reason}})
     else
@@ -292,12 +299,12 @@ defmodule TCPFilter_dist.Controller do
   end
 
   def call(controller, message) do
-    ref = Process.monitor(controller)
+    ref = :erlang.monitor(:process, controller)
     send(controller, {ref, self(), message})
 
     receive do
       {^ref, res} ->
-        Process.demonitor(ref, [:flush])
+        :erlang.demonitor(ref, [:flush])
         res
 
       {:DOWN, ^ref, :process, ^controller, reason} ->
