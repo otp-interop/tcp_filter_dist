@@ -53,10 +53,16 @@ To use TLS, use `TCPFilter.set_socket/1` with the `TCPFilter.SSLSocket` module:
 TCPFilter.set_socket(TCPFilter.SSLSocket)
 ```
 
-You can also set this filter when starting the `TCPFilter` in your supervisor:
+You can also set this socket when starting the `TCPFilter` in your supervisor:
 
 ```elixir
 {TCPFilter, filter: MyApp.Filter, socket: TCPFilter.SSLSocket, name: TCPFilter}
+```
+
+Set the `-ssl_dist_optfile` option when running your application:
+
+```
+iex --erl "-proto_dist Elixir.TCPFilter -ssl_dist_optfile my_tls.config" -S mix
 ```
 
 See [Erlang Distribution over TLS](https://www.erlang.org/doc/apps/ssl/ssl_distribution.html) for more information on configuring TLS in your application.
