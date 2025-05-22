@@ -65,25 +65,30 @@ defmodule TCPFilter do
   @version 131
   @distribution_header 68
   def decode(""),
-    do: :tick
+    do: {:ok, :tick}
 
   # non-fragmented messages with distribution header and a 0 atom cache
   def decode(<<@version, @distribution_header, 0, rest::binary>>) do
-    message = <<@version>> <> rest
+    try do
+      message = <<@version>> <> rest
 
-    {control_message, used} = :erlang.binary_to_term(message, [:safe, :used])
+      {control_message, used} = :erlang.binary_to_term(message, [:safe, :used])
 
-    control_message =
-      :erlang.setelement(1, control_message, control_message_type(elem(control_message, 0)))
+      control_message =
+        :erlang.setelement(1, control_message, control_message_type(elem(control_message, 0)))
 
-    <<_used::binary-size(used), message::binary>> = message
+      <<_used::binary-size(used), message::binary>> = message
 
-    case message do
-      <<>> ->
-        {control_message, nil}
+      case message do
+        <<>> ->
+          {:ok, {control_message, nil}}
 
-      message ->
-        {control_message, :erlang.binary_to_term(<<@version>> <> message, [:safe])}
+        message ->
+          {:ok, {control_message, :erlang.binary_to_term(<<@version>> <> message, [:safe])}}
+      end
+    rescue
+      _ ->
+        {:error, :unsafe}
     end
   end
 

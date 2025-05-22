@@ -196,34 +196,38 @@ defmodule TCPFilter_dist.Controller do
             exit(:connection_closed)
           {:data, data} ->
             # incoming data from remote node
-            safe_message = TCPFilter.decode(data)
-            filter_res = TCPFilter.filter(safe_message)
-            case filter_res do
-              :ok ->
-                try do
-                  :erlang.dist_ctrl_put_data(d_handle, data)
-                catch
-                  _, _ -> death_row()
+            case TCPFilter.decode(data) do
+              {:ok, safe_message} ->
+                filter_res = TCPFilter.filter(safe_message)
+                case filter_res do
+                  :ok ->
+                    try do
+                      :erlang.dist_ctrl_put_data(d_handle, data)
+                    catch
+                      _, _ -> death_row()
+                    end
+
+                  :ignore ->
+                    case safe_message do
+                      {control_message, nil} ->
+                        :error_logger.warning_msg(~c"** Ignored message ~p **~n", [control_message])
+
+                      {control_message, message} ->
+                        :error_logger.warning_msg(~c"** Ignored message ~p: ~p **~n", [
+                          control_message,
+                          message
+                        ])
+                    end
+
+                  {:error, reason} ->
+                    :error_logger.error_msg(~c"** Ignored message **~n** Reason: ~p **~n", [reason])
+
+                  {:rewrite, rewritten} ->
+                    <<131, encoded_data::binary>> = :erlang.term_to_binary(rewritten)
+                    :erlang.dist_ctrl_put_data(d_handle, <<131, 68, 0>> <> encoded_data)
                 end
-
-              :ignore ->
-                case safe_message do
-                  {control_message, nil} ->
-                    :error_logger.warning_msg(~c"** Ignored message ~p **~n", [control_message])
-
-                  {control_message, message} ->
-                    :error_logger.warning_msg(~c"** Ignored message ~p: ~p **~n", [
-                      control_message,
-                      message
-                    ])
-                end
-
               {:error, reason} ->
                 :error_logger.error_msg(~c"** Ignored message **~n** Reason: ~p **~n", [reason])
-
-              {:rewrite, rewritten} ->
-                <<131, encoded_data::binary>> = :erlang.term_to_binary(rewritten)
-                :erlang.dist_ctrl_put_data(d_handle, <<131, 68, 0>> <> encoded_data)
             end
 
             input_loop(d_handle, socket_tuple, n - 1)
